@@ -2,6 +2,7 @@ import argparse
 import logging
 import socket
 import time
+from _socket import timeout
 
 import serial
 
@@ -57,35 +58,46 @@ def main():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((args.host, args.port))
         s.listen()
-        conn, addr = s.accept()
-        try:
-            logging.info(f"Connected by {addr}")
-            logging.debug(f"Starting initial delay of {args.break_delay}ms before break")
-            time.sleep(args.break_delay / 1000)
-            logging.debug(f"Sending break pulse of {args.break_length}ms")
-            ser.send_break(args.break_length / 1000)
-
-            data = ser.read(1024)
-
-            logging.debug(f"Received the following during the break: {data}")
-
-            conn.sendall(data)
-
-            while True:
-                data = conn.recv(1024)
-                if not data:
-                    break
-
-                logging.debug(f"-> {data}")
+        while True:
+            conn, addr = s.accept()
+            try:
+                logging.info(f"Connected by {addr}")
+                conn.setblocking(0)
+                conn.settimeout(0.01)
+                logging.debug(f"Starting initial delay of {args.break_delay}ms before break")
+                time.sleep(args.break_delay / 1000)
+                logging.debug(f"Sending break pulse of {args.break_length}ms")
+                ser.send_break(args.break_length / 1000)
 
                 data = ser.read(1024)
 
-                if data:
-                    logging.debug(f"<- {data}")
-                    conn.sendall(data)
-        finally:
-            logging.info(f"Closing connection from {addr}")
-            conn.close()
+                logging.debug(f"Received the following during the break: {data}")
+
+                logging.debug(f"O<- {data}")
+                conn.sendall(data)
+
+                while True:
+                    try:
+                        data = None
+                        data = conn.recv(1024)
+                        if not data:
+                            break
+                    except timeout:
+                        pass
+
+                    if data is not None:
+                        logging.debug(f"I-> {data}")
+
+                        ser.write(data)
+
+                    data = ser.read(1024)
+
+                    if data:
+                        logging.debug(f"O<- {data}")
+                        conn.sendall(data)
+            finally:
+                logging.info(f"Closing connection from {addr}")
+                conn.close()
 
 
 if __name__ == "__main__":
